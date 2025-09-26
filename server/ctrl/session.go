@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -45,7 +46,7 @@ func SessionGet(ctx *App, res http.ResponseWriter, req *http.Request) {
 	}
 	r.IsAuth = true
 	r.Home = NewString(home)
-	r.Backend = Hash(GenerateID(ctx.Session)+ctx.Session["path"], 20)
+	r.Backend = backendID(ctx.Session)
 	if ctx.Share.Id == "" && Config.Get("features.protection.enable_chromecast").Bool() {
 		r.Authorization = ctx.Authorization
 	}
@@ -69,6 +70,7 @@ func SessionAuthenticate(ctx *App, res http.ResponseWriter, req *http.Request) {
 	backend, err := model.NewBackend(ctx, session)
 	if err != nil {
 		Log.Debug("session::auth 'NewBackend' %+v", err)
+		Log.Info("[auth] status=failed user=%s backend=%s::%s ip=%s err=%s", username(session), session["type"], backendID(session), ip(req), ferror(err))
 		SendErrorResult(res, err)
 		return
 	}
@@ -86,6 +88,7 @@ func SessionAuthenticate(ctx *App, res http.ResponseWriter, req *http.Request) {
 		backend, err = model.NewBackend(ctx, session)
 		if err != nil {
 			Log.Debug("session::auth 'OAuthToken::NewBackend' %+v", err)
+			Log.Info("[auth] status=failed user=%s backend=%s::%s ip=%s err=%s", username(session), session["type"], backendID(session), ip(req), ferror(err))
 			SendErrorResult(res, NewError("Can't authenticate", 401))
 			return
 		}
@@ -136,11 +139,13 @@ func SessionAuthenticate(ctx *App, res http.ResponseWriter, req *http.Request) {
 	if Config.Get("features.protection.iframe").String() != "" {
 		res.Header().Set("bearer", obfuscate)
 	}
-	if home != "" {
-		SendSuccessResult(res, home)
-		return
-	}
-	SendSuccessResult(res, nil)
+	Log.Info("[auth] status=success user=%s backend=%s::%s ip=%s", username(session), session["type"], backendID(session), ip(req))
+	SendSuccessResult(res, Session{
+		IsAuth:        true,
+		Home:          NewString(home),
+		Backend:       backendID(session),
+		Authorization: obfuscate,
+	})
 }
 
 func SessionLogout(ctx *App, res http.ResponseWriter, req *http.Request) {
@@ -317,13 +322,14 @@ func SessionAuthMiddleware(ctx *App, res http.ResponseWriter, req *http.Request)
 	// - identity provider redirection uri. eg: oauth2, openid, ...
 	templateBind, err := plugin.Callback(formData, idpParams, res)
 	if err == ErrAuthenticationFailed {
+		Log.Warning("failed authentication - %s", err.Error())
 		http.Redirect(
 			res, req,
 			req.URL.Path+"?action=redirect",
 			http.StatusSeeOther,
 		)
 		return
-	} else if err != nil {
+	} else if err != nil && strings.HasPrefix(res.Header().Get("Content-Type"), "text/html") == false {
 		Log.Error("session::authMiddleware 'callback error - %s'", err.Error())
 		http.Redirect(
 			res, req,
@@ -331,7 +337,10 @@ func SessionAuthMiddleware(ctx *App, res http.ResponseWriter, req *http.Request)
 			http.StatusSeeOther,
 		)
 		return
+	} else if err != nil { // response handled directly within a plugin
+		return
 	}
+
 	templateBind["machine_id"] = GenerateMachineID()
 	for _, value := range os.Environ() {
 		pair := strings.SplitN(value, "=", 2)
@@ -451,7 +460,8 @@ func SessionAuthMiddleware(ctx *App, res http.ResponseWriter, req *http.Request)
 	}
 
 	if _, err := model.NewBackend(ctx, session); err != nil {
-		Log.Debug("session::authMiddleware 'backend connection failed %+v - %s'", session, err.Error())
+		Log.Debug("session::authMiddleware 'backend connection failed %s'", err.Error())
+		Log.Info("[auth] status=failed user=%s backend=%s::%s ip=%s err=%s", username(session), session["type"], backendID(session), ip(req), ferror(err))
 		url := "/?error=" + ErrNotValid.Error() + "&trace=backend error - " + err.Error()
 		if IsATranslatedError(err) {
 			url = "/?error=" + err.Error() + "&trace=backend error - " + err.Error()
@@ -488,6 +498,7 @@ func SessionAuthMiddleware(ctx *App, res http.ResponseWriter, req *http.Request)
 	if Config.Get("features.protection.iframe").String() != "" {
 		redirectURI += "#bearer=" + obfuscate
 	}
+	Log.Info("[auth] status=success user=%s backend=%s::%s ip=%s", username(session), session["type"], backendID(session), ip(req))
 	http.Redirect(res, req, redirectURI, http.StatusSeeOther)
 }
 
@@ -509,4 +520,37 @@ func applyCookieRules(cookie *http.Cookie, req *http.Request) *http.Cookie {
 func applyCookieSameSiteRule(cookie *http.Cookie, sameSiteValue http.SameSite) *http.Cookie {
 	cookie.SameSite = sameSiteValue
 	return cookie
+}
+
+func backendID(session map[string]string) string {
+	return Hash(GenerateID(session)+session["path"], 20)
+}
+
+func username(session map[string]string) string {
+	if session["username"] != "" {
+		return strings.ReplaceAll(session["username"], " ", "+")
+	} else if session["user"] != "" {
+		return strings.ReplaceAll(session["user"], " ", "+")
+	}
+	return GenerateID(session)
+}
+
+func ip(req *http.Request) string {
+	if xff := req.Header.Get("X-Forwarded-For"); xff != "" {
+		if parts := strings.Split(xff, ","); len(parts) > 0 {
+			return strings.TrimSpace(parts[0])
+		}
+	}
+	if xrip := req.Header.Get("X-Real-Ip"); xrip != "" {
+		return xrip
+	}
+	host, _, err := net.SplitHostPort(req.RemoteAddr)
+	if err != nil {
+		return req.RemoteAddr
+	}
+	return host
+}
+
+func ferror(err error) string {
+	return strings.ReplaceAll(err.Error(), " ", "+")
 }

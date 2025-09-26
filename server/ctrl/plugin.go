@@ -13,15 +13,6 @@ import (
 	"github.com/gorilla/mux"
 )
 
-func init() {
-	Hooks.Register.Onload(func() {
-		if err := model.PluginDiscovery(); err != nil {
-			Log.Error("Plugin Discovery failed. err=%s", err.Error())
-			os.Exit(1)
-		}
-	})
-}
-
 func PluginExportHandler(ctx *App, res http.ResponseWriter, req *http.Request) {
 	plgExports := map[string][]string{}
 	for name, plg := range model.PLUGINS {
@@ -33,12 +24,12 @@ func PluginExportHandler(ctx *App, res http.ResponseWriter, req *http.Request) {
 				}
 				plgExports[module["mime"]] = []string{
 					module["application"],
-					WithBase(JoinPath("/plugin/", filepath.Join(name, index))),
+					WithBase(JoinPath("/assets/"+BUILD_REF+"/plugin/", filepath.Join(name+".zip", index))),
 				}
 			}
 		}
 	}
-	SendSuccessResult(res, plgExports)
+	SendSuccessResultWithEtagAndGzip(res, req, plgExports)
 }
 
 func PluginStaticHandler(ctx *App, res http.ResponseWriter, req *http.Request) {
@@ -53,15 +44,17 @@ func PluginStaticHandler(ctx *App, res http.ResponseWriter, req *http.Request) {
 		{"", ""},
 	}
 
-	var file io.ReadCloser
-	var err error
+	var (
+		b   []byte
+		err error
+	)
 	head := res.Header()
 	acceptEncoding := req.Header.Get("Accept-Encoding")
 	for _, cfg := range staticConfig {
 		if strings.Contains(acceptEncoding, cfg.ContentType) == false {
 			continue
 		}
-		file, err = model.GetPluginFile(mux.Vars(req)["name"], path+cfg.FileExt)
+		b, err = model.GetPluginFile(mux.Vars(req)["name"], path+cfg.FileExt)
 		if err != nil {
 			continue
 		}
@@ -69,11 +62,22 @@ func PluginStaticHandler(ctx *App, res http.ResponseWriter, req *http.Request) {
 		if cfg.ContentType != "" {
 			head.Set("Content-Encoding", cfg.ContentType)
 		}
-		io.Copy(res, file)
-		file.Close()
+		res.Write(b)
 		return
 	}
-
 	SendErrorResult(res, err)
 	return
+}
+
+func PluginDownloadHandler(ctx *App, res http.ResponseWriter, req *http.Request) {
+	f, err := os.Open(JoinPath(
+		GetAbsolutePath(PLUGIN_PATH),
+		mux.Vars(req)["name"]+".zip",
+	))
+	if err != nil {
+		SendErrorResult(res, err)
+		return
+	}
+	io.Copy(res, f)
+	f.Close()
 }

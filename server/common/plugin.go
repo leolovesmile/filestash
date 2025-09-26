@@ -1,6 +1,7 @@
 package common
 
 import (
+	"bytes"
 	"io"
 	"io/fs"
 	"net/http"
@@ -223,6 +224,27 @@ func (this Get) CSS() string {
 	return s
 }
 
+var favicon struct {
+	binary []byte
+	mime   string
+}
+
+func (this Register) Favicon(binary []byte) {
+	favicon.binary = binary
+	favicon.mime = "image/svg+xml"
+	if bytes.HasPrefix(binary, []byte{0x00, 0x00, 0x01, 0x00}) {
+		favicon.mime = "image/x-icon"
+	} else if bytes.HasPrefix(binary, []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A}) {
+		favicon.mime = "image/png"
+	} else if bytes.HasPrefix(binary, []byte{0x47, 0x49, 0x46, 0x38}) {
+		favicon.mime = "image/vnd.microsoft.icon"
+	}
+}
+
+func (this Get) Favicon() ([]byte, string) {
+	return favicon.binary, favicon.mime
+}
+
 const OverrideVideoSourceMapper = "/overrides/video-transcoder.js"
 
 var afterload []func()
@@ -244,14 +266,24 @@ func (this Get) Middleware() []func(HandlerFunc) HandlerFunc {
 	return middlewares
 }
 
-var staticOverrides []fs.FS
+var staticOverrides [][]byte
 
-func (this Register) StaticPatch(folder fs.FS) {
-	staticOverrides = append(staticOverrides, folder)
+func (this Register) StaticPatch(pathFile []byte) {
+	staticOverrides = append(staticOverrides, pathFile)
 }
 
-func (this Get) StaticPatch() []fs.FS {
+func (this Get) StaticPatch() [][]byte {
 	return staticOverrides
+}
+
+var meta IMetadata
+
+func (this Register) Metadata(m IMetadata) {
+	meta = m
+}
+
+func (this Get) Metadata() IMetadata {
+	return meta
 }
 
 func init() {
