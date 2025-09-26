@@ -10,6 +10,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -52,7 +53,16 @@ func SessionGet(ctx *App, res http.ResponseWriter, req *http.Request) {
 }
 
 func SessionAuthenticate(ctx *App, res http.ResponseWriter, req *http.Request) {
+	// Initialize a mutex for ctx.Body if not already done
+	if ctx.BodyMutex == nil {
+		ctx.BodyMutex = &sync.Mutex{}
+	}
+
+	// Lock the mutex before modifying ctx.Body
+	ctx.BodyMutex.Lock()
 	ctx.Body["timestamp"] = time.Now().Format(time.RFC3339)
+	ctx.BodyMutex.Unlock()
+
 	session := model.MapStringInterfaceToMapStringString(ctx.Body)
 	session["path"] = EnforceDirectory(session["path"])
 

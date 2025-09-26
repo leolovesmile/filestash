@@ -1,0 +1,27 @@
+# Dockerfile for filestash, of Leo's flavor
+FROM debian:stable-slim
+
+ENV LOCAL_DEB_REPO=$LOCAL_DEB_REPO
+
+WORKDIR /app/
+COPY ./dist/ .
+
+RUN rm  /etc/apt/sources.list.d/debian.sources -f && \
+    echo "deb $LOCAL_DEB_REPO bookworm main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
+    echo "deb $LOCAL_DEB_REPO bookworm-updates main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
+    echo "deb $LOCAL_DEB_REPO bookworm-backports main contrib non-free non-free-firmware" >> /etc/apt/sources.list && \
+    apt-get update > /dev/null && \
+    apt-get install -y --no-install-recommends apt-utils && \
+    apt-get install -y --no-install-recommends curl ffmpeg libjpeg-dev libpng-dev libwebp-dev libraw-dev libheif-dev libgif-dev && \
+    rm -rf /var/lib/apt/lists/* && \
+    useradd filestash && \
+    chown -R filestash:filestash /app/ && \
+    find /app/data/ -type d -exec chmod 770 {} \; && \
+    find /app/data/ -type f -exec chmod 760 {} \; && \
+    chmod 730 /app/filestash && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm -rf /tmp/*
+# libtiff-dev is not available in the debian stable-slim repository
+USER filestash
+CMD ["/app/filestash"]
+EXPOSE 8334

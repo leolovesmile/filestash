@@ -2,6 +2,7 @@ package common
 
 import (
 	"context"
+	"sync"
 )
 
 type App struct {
@@ -12,4 +13,5 @@ type App struct {
 	Context       context.Context
 	Authorization string
 	Languages     []string
+	BodyMutex     *sync.Mutex
 }
