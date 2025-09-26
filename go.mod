@@ -16,7 +16,7 @@ require (
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.1
 	github.com/h2non/bimg v1.1.9
-	github.com/leolovesmile/go-smb2 v1.1.5
+	github.com/leolovesmile/go-smb2 v1.1.7
 	github.com/lib/pq v1.10.9
 	github.com/mattn/go-sqlite3 v1.14.22
 	github.com/mickael-kerjean/net v0.0.0-20191120063050-2457c043ba06
